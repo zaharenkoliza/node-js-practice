@@ -66,6 +66,78 @@ app.post('/api/rooms', async (req, res) => {
     res.status(201).location(`/api/rooms/${room.id}`).json(room);
 })
 
+app.get('/api/rooms', async (req, res) => {
+    const { status } = req.query;
+
+    if (status !== undefined) {
+        const { rows } = await pool.query(
+            'SELECT id, amount_of_players, status, time_for_move FROM rooms WHERE status = $1 ORDER BY id',
+            [status],
+        );
+        return res.json(rows);
+    }
+
+    const { rows } = await pool.query(
+        'SELECT id, amount_of_players, status, time_for_move FROM rooms ORDER BY id',
+    );
+    res.json(rows);
+});
+
+app.patch('/api/rooms/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 0) {
+        return res.status(400).json({ error: 'id должен быть положительным и целым числом' });
+    }
+
+    const { status, timeForMove } = req.body ?? {};
+    if (status === undefined && timeForMove === undefined) {
+        return res.status(400).json({ error: 'нужно передать status и/или timeForMove' });
+    }
+    if (status !== undefined && (typeof status !== 'string' || status.trim() === '')) {
+        return res.status(400).json({ error: 'status должен быть непустой строкой' });
+    }
+    if (timeForMove !== undefined && (!Number.isInteger(timeForMove) || timeForMove <= 0)) {
+        return res.status(400).json({ error: 'timeForMove должен быть положительным целым числом' });
+    }
+
+    const { rows } = await pool.query(
+        `UPDATE rooms
+         SET status = COALESCE($1, status),
+             time_for_move = COALESCE($2, time_for_move)
+         WHERE id = $3
+         RETURNING id, amount_of_players, status, time_for_move`,
+        [status ?? null, timeForMove ?? null, id],
+    );
+
+    if (rows.length === 0) {
+        return res.status(404).json({ error: 'Комната не найдена' });
+    }
+    res.json(rows[0]);
+});
+
+app.delete('/api/rooms/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 0) {
+        return res.status(400).json({ error: 'id должен быть положительным и целым числом' });
+    }
+
+    const { rowCount } = await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+    if (rowCount === 0) {
+        return res.status(404).json({ error: 'Комната не найдена' });
+    }
+    res.status(204).end();
+});
+
+app.get('/api/stats/rooms', async (req, res) => {
+    const { rows } = await pool.query(
+        `SELECT status, COUNT(*)::int AS count, AVG(amount_of_players)::float AS avg_players
+         FROM rooms
+         GROUP BY status
+         ORDER BY count DESC`,
+    );
+    res.json(rows);
+});
+
 // app.use((req,res, next) => {
 //     console.log('Прошел запрос');
 //     next();
